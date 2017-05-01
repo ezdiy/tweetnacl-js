@@ -712,10 +712,12 @@ function crypto_sign_keypair(pk, sk, seeded) {
   d[31] &= 127;
   d[31] |= 64;
 
-  scalarbase(p, d);
-  pack(pk, p);
+  if (pk !== null) {
+    scalarbase(p, d);
+    pack(pk, p);
+  }
 
-  for (i = 0; i < 32; i++) sk[i+32] = pk[i];
+  for (i = 0; i < 32; i++) sk[i+32] = d[i];
   return 0;
 }
 
@@ -754,15 +756,28 @@ function reduce(r) {
 }
 
 // Note: difference from C - smlen returned, not passed as argument.
-function crypto_sign(sm, m, n, sk) {
+function crypto_sign(sm, m, n, sk, pk) {
   var d = new Uint8Array(64), h = new Uint8Array(64), r = new Uint8Array(64);
   var i, j, x = new Float64Array(64);
   var p = [gf(), gf(), gf(), gf()];
 
   crypto_hash(d, sk, 32);
-  d[0] &= 248;
-  d[31] &= 127;
-  d[31] |= 64;
+  i = 0;
+  if (pk) {
+    for (i = 0; i < 32; i++) {
+      if (sk[i+32] !== pk[i])
+        break;
+    }
+  }
+  if (i == 32) {
+    // Old-style seeded key
+    d[0] &= 248;
+    d[31] &= 127;
+    d[31] |= 64;
+  } else {
+    // New-style key with explicit scalar
+    for (i = 0; i < 32; i++) d[i] = sk[32 + i];
+  }
 
   var smlen = n + 64;
   for (i = 0; i < n; i++) sm[64 + i] = m[i];
@@ -1038,14 +1053,54 @@ nacl.box.sharedKeyLength = crypto_box_BEFORENMBYTES;
 nacl.box.nonceLength = crypto_box_NONCEBYTES;
 nacl.box.overheadLength = nacl.secretbox.overheadLength;
 
-nacl.sign = function(msg, secretKey) {
+nacl.sign = function(msg, secretKey, publicKey) {
   checkArrayTypes(msg, secretKey);
   if (secretKey.length !== crypto_sign_SECRETKEYBYTES)
     throw new Error('bad secret key size');
+  if (publicKey) {
+    checkArrayTypes(publicKey);
+    if (secretKey.length !== crypto_sign_PUBLICKEYBYTES)
+      throw new Error('bad secret key size');
+  }
   var signedMsg = new Uint8Array(crypto_sign_BYTES+msg.length);
-  crypto_sign(signedMsg, msg, msg.length, secretKey);
+  crypto_sign(signedMsg, msg, msg.length, secretKey, publicKey);
   return signedMsg;
 };
+
+nacl.sign.pointMult = function(point, scalar) {
+	var temp = [gf(),gf(),gf(),gf()];
+  var outk = new Uint8Array(32);
+  if (!point) {
+	  scalarbase(temp, scalar);
+  } else {
+    if (point.length !== crypto_sign_PUBLICKEYBYTES)
+      throw new Error('bad ed point size');
+	  unpackneg(uk, point);
+	  scalarmult(temp, uk, scalar);
+  }
+	pack(outk, temp)
+	return outk
+}
+
+nacl.sign.scalarAdd = function(secretKey, scalar) {
+  if (secretKey.length !== crypto_sign_SECRETKEYBYTES)
+    throw new Error('bad secret key size');
+  var rsk = new Uint8Array(32);
+  var res = new Uint8Array(64);
+  var sk = new Float64Array(64);
+
+  for (i = 0; i < 32; i++) {
+    var mask = i<32?0xff:0x7f;
+    sk[i] = (secretKey[i+32] & mask) + scalar
+    res[i] = secretKey[i]
+  }
+  modL(rsk, sk)
+  for (i = 0; i < 32; i++) {
+    res[i+32] = rsk[i]
+  }
+  outk[63] |= secretKey[63] & 0x80
+	return outk
+}
 
 nacl.sign.open = function(signedMsg, publicKey) {
   checkArrayTypes(signedMsg, publicKey);
@@ -1059,8 +1114,8 @@ nacl.sign.open = function(signedMsg, publicKey) {
   return m;
 };
 
-nacl.sign.detached = function(msg, secretKey) {
-  var signedMsg = nacl.sign(msg, secretKey);
+nacl.sign.detached = function(msg, secretKey, publicKey) {
+  var signedMsg = nacl.sign(msg, secretKey, publicKey);
   var sig = new Uint8Array(crypto_sign_BYTES);
   for (var i = 0; i < sig.length; i++) sig[i] = signedMsg[i];
   return sig;
@@ -1091,9 +1146,7 @@ nacl.sign.keyPair.fromSecretKey = function(secretKey) {
   checkArrayTypes(secretKey);
   if (secretKey.length !== crypto_sign_SECRETKEYBYTES)
     throw new Error('bad secret key size');
-  var pk = new Uint8Array(crypto_sign_PUBLICKEYBYTES);
-  for (var i = 0; i < pk.length; i++) pk[i] = secretKey[32+i];
-  return {publicKey: pk, secretKey: new Uint8Array(secretKey)};
+  return nacl.sign.keyPair.fromSeed(secretKey.subarray(0, crypto_sign_SEEDBYTES))
 };
 
 nacl.sign.keyPair.fromSeed = function(seed) {

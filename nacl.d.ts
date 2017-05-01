@@ -58,7 +58,7 @@ declare namespace nacl {
 
     namespace sign {
         export interface detached {
-            (msg: Uint8Array, secretKey: Uint8Array): Uint8Array;
+            (msg: Uint8Array, secretKey: Uint8Array, publicKey?: Uint8Array): Uint8Array;
             verify(msg: Uint8Array, sig: Uint8Array, publicKey: Uint8Array): boolean;
         }
 
@@ -70,7 +70,7 @@ declare namespace nacl {
     }
 
     export interface sign {
-        (msg: Uint8Array, secretKey: Uint8Array): Uint8Array;
+        (msg: Uint8Array, secretKey: Uint8Array, publicKey?: Uint8Array): Uint8Array;
         open(signedMsg: Uint8Array, publicKey: Uint8Array): Uint8Array | null;
         detached: sign.detached;
         keyPair: sign.keyPair;
