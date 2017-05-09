@@ -1091,7 +1091,7 @@ nacl.sign.scalarAdd = function(secretKey, scalar) {
 
   for (i = 0; i < 32; i++) {
     var mask = i<32?0xff:0x7f;
-    sk[i] = (secretKey[i+32] & mask) + scalar
+    sk[i] = (secretKey[i+32] & mask) + scalar[i]
     res[i] = secretKey[i]
   }
   modL(rsk, sk)
